@@ -5,10 +5,18 @@
 # the WPILib BSD license file in the root directory of this project.
 #
 
-from wpilib import SmartDashboard
+# In the C:\Users\Admin_4034\Desktop\2025-robotics directory, run
+#
+#    python -m robotpy deploy
+#
+# to deploy code to the robot.
+
+from wpilib import SmartDashboard 
 import wpilib
 import wpilib.drive
 import phoenix5
+
+
 
 class MyRobot(wpilib.TimedRobot):
     def robotInit(self):
@@ -16,13 +24,17 @@ class MyRobot(wpilib.TimedRobot):
         This function is called upon program startup and
         should be used for any initialization code.
         """
-        self.leftDrive = phoenix5.WPI_TalonSRX(3)
-        self.rightDrive = phoenix5.WPI_TalonSRX(5)
-        self.robotDrive = wpilib.drive.DifferentialDrive(
-            self.leftDrive, self.rightDrive
-        )
+        self.leftDrive = phoenix5.WPI_TalonSRX(5)
+        self.rightDrive = phoenix5.WPI_TalonSRX(3)
+        self.elevator = phoenix5.WPI_TalonSRX(4)
+        
+
+        self.robotDrive = wpilib.drive.DifferentialDrive(self.leftDrive, self.rightDrive)
         self.controller = wpilib.XboxController(0)
+        
         self.timer = wpilib.Timer()
+        self.timeSnapshot = 0
+        
 
         # We need to invert one side of the drivetrain so that positive voltages
         # result in both sides moving forward. Depending on how your robot's
@@ -35,11 +47,11 @@ class MyRobot(wpilib.TimedRobot):
 
     def autonomousPeriodic(self):
         """This function is called periodically during autonomous."""
+        # SmartDashboard.putBoolean("A", self.controller.getAButton())
 
-        # Drive for two seconds
-        if self.timer.get() < 2.0:
+        if self.timer.get() < 20:
             # Drive forwards half speed, make sure to turn input squaring off
-            self.robotDrive.arcadeDrive(1, 0, squareInputs=False)
+            self.robotDrive.arcadeDrive(1, 0, squareInputs=True)
         else:
             self.robotDrive.stopMotor()  # Stop robot
 
@@ -48,15 +60,43 @@ class MyRobot(wpilib.TimedRobot):
 
     def teleopPeriodic(self):
         """This function is called periodically during teleoperated mode."""
-        self.robotDrive.arcadeDrive(
-            -self.controller.getLeftY(), -self.controller.getRightX()
-        )
+        #SmartDashboard.putBoolean("A", self.controller.getAButton()) How to detect a button press
+
+        moveFB = self.controller.getLeftY()
+        turnLR = self.controller.getRightX() * -1 # Negative lets you turn with perspective
+        lTrig = self.controller.getLeftTriggerAxis()
+        yPress = self.controller.getYButton()
+        xPress = self.controller.getXButton()
+
+
+
+        SmartDashboard.putNumber("LY Axis", moveFB)
+        SmartDashboard.putNumber("RX Axis", turnLR)
+        SmartDashboard.putNumber("L Bumper", lTrig)
+        SmartDashboard.putBoolean("Y Button", yPress)
+        SmartDashboard.putBoolean("X Button", xPress)
+        
+
+        if yPress == True:
+            self.robotDrive.arcadeDrive(moveFB, turnLR, squareInputs=True)
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig)
+        else:
+            self.robotDrive.arcadeDrive(moveFB * 0.5, turnLR * 0.5, squareInputs=True)
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig * 0.25)
+        
+
+    """ if xPress == True:
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.25)
+        else:
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
+            """
 
     def testInit(self):
         """This function is called once each time the robot enters test mode."""
 
     def testPeriodic(self):
         """This function is called periodically during test mode."""
+
 
 if __name__ == "__main__":
     wpilib.run(MyRobot)
