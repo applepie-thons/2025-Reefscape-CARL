@@ -11,12 +11,14 @@
 #
 # to deploy code to the robot.
 
+# Figure out how to use encoder
+
 from wpilib import SmartDashboard 
 import wpilib
 import wpilib.drive
 import phoenix5
-
-
+# from wpilib.cameraserver import CameraServer
+from cscore import CameraServer, VideoMode
 
 class MyRobot(wpilib.TimedRobot):
     def robotInit(self):
@@ -26,15 +28,17 @@ class MyRobot(wpilib.TimedRobot):
         """
         self.leftDrive = phoenix5.WPI_TalonSRX(5)
         self.rightDrive = phoenix5.WPI_TalonSRX(3)
-        self.elevator = phoenix5.WPI_TalonSRX(4)
-        
+        self.elevator = phoenix5.WPI_TalonSRX(7)
+        camera = CameraServer.startAutomaticCapture()
+        camera.setPixelFormat( VideoMode.PixelFormat.kMJPEG )
+        camera.setResolution( 1280, 720 )
+        camera.setFPS( 30 )
 
         self.robotDrive = wpilib.drive.DifferentialDrive(self.leftDrive, self.rightDrive)
         self.controller = wpilib.XboxController(0)
         
         self.timer = wpilib.Timer()
         self.timeSnapshot = 0
-        
 
         # We need to invert one side of the drivetrain so that positive voltages
         # result in both sides moving forward. Depending on how your robot's
@@ -67,23 +71,28 @@ class MyRobot(wpilib.TimedRobot):
         lTrig = self.controller.getLeftTriggerAxis()
         yPress = self.controller.getYButton()
         xPress = self.controller.getXButton()
-
-
-
+        aPress = self.controller.getAButton()
+        bPress = self.controller.getBButtonPressed()
+        
         SmartDashboard.putNumber("LY Axis", moveFB)
         SmartDashboard.putNumber("RX Axis", turnLR)
-        SmartDashboard.putNumber("L Bumper", lTrig)
+        SmartDashboard.putNumber("L Trigger", lTrig)
+        #SmartDashboard.putNumber("R Trigger", rTrig)
         SmartDashboard.putBoolean("Y Button", yPress)
         SmartDashboard.putBoolean("X Button", xPress)
-        
 
-        if yPress == True:
+        if aPress == True and xPress == True:
+            self.robotDrive.arcadeDrive(moveFB, turnLR, squareInputs=True)                   #fast reverse
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig * -1)
+        elif aPress == True:                                                                 #fast normal
             self.robotDrive.arcadeDrive(moveFB, turnLR, squareInputs=True)
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig)
-        else:
+        elif xPress == True:                                                                 #slow reverse
+            self.robotDrive.arcadeDrive(moveFB * 0.5, turnLR * 0.5, squareInputs=True)
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig * -0.25)
+        else:                                                                                #slow normal
             self.robotDrive.arcadeDrive(moveFB * 0.5, turnLR * 0.5, squareInputs=True)
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig * 0.25)
-        
 
     """ if xPress == True:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.25)
