@@ -29,6 +29,27 @@ class MyRobot(wpilib.TimedRobot):
         self.leftDrive = phoenix5.WPI_TalonSRX(5)
         self.rightDrive = phoenix5.WPI_TalonSRX(3)
         self.elevator = phoenix5.WPI_TalonSRX(7)
+
+        self.encoder = wpilib.Encoder(0, 1, False, wpilib.Encoder.EncodingType.k2X)
+        self.encoder.reset()
+
+        self.elevatorPresetKey = 0
+        self.elevatorPreset = {
+                    0: "Processor",
+                    1: "Reef Low",
+                    2: "Reef High",
+                    3: 'Barge'
+        }
+
+        distanceAtTopFirstStageDefault = 10890.5
+        distanceAtTopFirstStageInches = 31.625
+        self.encoder.setDistancePerPulse(
+            distanceAtTopFirstStageInches / distanceAtTopFirstStageDefault )
+        #self.encoder.setDistancePerPulse(0.003)
+
+
+        # self.encoder.setDistancePerPulse((17.5/3) * 0.0005)
+
         camera = CameraServer.startAutomaticCapture()
         camera.setPixelFormat( VideoMode.PixelFormat.kMJPEG )
         camera.setResolution( 1280, 720 )
@@ -53,11 +74,12 @@ class MyRobot(wpilib.TimedRobot):
         """This function is called periodically during autonomous."""
         # SmartDashboard.putBoolean("A", self.controller.getAButton())
 
-        if self.timer.get() < 20:
-            # Drive forwards half speed, make sure to turn input squaring off
-            self.robotDrive.arcadeDrive(1, 0, squareInputs=True)
+        if self.encoder.getDistance() < 5:
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.125)
         else:
-            self.robotDrive.stopMotor()  # Stop robot
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
+
+        SmartDashboard.putNumber("Elevator Height", self.encoder.getDistance())
 
     def teleopInit(self):
         """This function is called once each time the robot enters teleoperated mode."""
@@ -72,14 +94,37 @@ class MyRobot(wpilib.TimedRobot):
         yPress = self.controller.getYButton()
         xPress = self.controller.getXButton()
         aPress = self.controller.getAButton()
-        bPress = self.controller.getBButtonPressed()
+        bPress = self.controller.getBButton()
+        lBumpPress = self.controller.getLeftBumperButtonPressed()
+        rBumpPress = self.controller.getRightBumperButtonPressed()
+
+        elHeight = self.encoder.getDistance()
+        elHeightLst = [self.elevatorPresetKey == self.elevatorPreset[0],
+                        self.elevatorPresetKey == self.elevatorPreset[1],
+                        self.elevatorPresetKey == self.elevatorPreset[2],
+                        self.elevatorPresetKey == self.elevatorPreset[3]]
+
         
-        SmartDashboard.putNumber("LY Axis", moveFB)
-        SmartDashboard.putNumber("RX Axis", turnLR)
-        SmartDashboard.putNumber("L Trigger", lTrig)
+        SmartDashboard.putNumber("Drive Power (LY)", moveFB)
+        SmartDashboard.putNumber("Turn Power (RX)", turnLR)
+        SmartDashboard.putNumber("Elevator Power (LTrig)", lTrig)
         #SmartDashboard.putNumber("R Trigger", rTrig)
+
         SmartDashboard.putBoolean("Y Button", yPress)
-        SmartDashboard.putBoolean("X Button", xPress)
+        SmartDashboard.putBoolean("Reverse Toggle (X)", xPress)
+        SmartDashboard.putBoolean("Speed Toggle (A)", aPress)
+        
+        SmartDashboard.putBoolean("Height Reset (B)", bPress)
+        SmartDashboard.putNumber("Elevator Height", elHeight)
+        SmartDashboard.putBooleanArray("Elevator Height Preset", elHeightLst)
+
+
+
+        if lBumpPress == True:
+            self.elevatorPresetKey -= 1
+        elif rBumpPress == True:
+            self.elevatorPresetKey += 1
+
 
         if aPress == True and xPress == True:
             self.robotDrive.arcadeDrive(moveFB, turnLR, squareInputs=True)                   #fast reverse
@@ -93,6 +138,10 @@ class MyRobot(wpilib.TimedRobot):
         else:                                                                                #slow normal
             self.robotDrive.arcadeDrive(moveFB * 0.5, turnLR * 0.5, squareInputs=True)
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, lTrig * 0.25)
+
+
+        if bPress == True:
+            self.encoder.reset()
 
     """ if xPress == True:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.25)
