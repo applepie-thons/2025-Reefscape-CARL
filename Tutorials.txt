@@ -16,3 +16,10 @@ This is how we need to program the elevator and claw arm moters.
 
 How to preset movements using a button press.
 """
+
+"""
+if yPress == True:
+    freeMode = not freeMode
+
+Use this to change the value of a variable from True to False and False to True
+"""
