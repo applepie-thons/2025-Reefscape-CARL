@@ -19,8 +19,14 @@ from wpilib import SmartDashboard
 import wpilib
 import wpilib.drive
 import phoenix5
-# from wpilib.cameraserver import CameraServer
 from cscore import CameraServer, VideoMode
+
+ELV_ENCODER_A_PWM_PORT = 0
+ELV_ENCODER_B_PWM_PORT = 1
+
+class ElvControlMode(Enum):
+    MANUAL = 0
+    AUTO = 1
 
 class ElvPresets(Enum):
     PROCESSOR = 0
@@ -29,23 +35,55 @@ class ElvPresets(Enum):
     BARGE = 3
 
 class MyRobot(wpilib.TimedRobot):
+    def hardwareInit(self):
+        # ------ Game Controller ------ #
+        self.controller = wpilib.XboxController(0)
+
+        # ------ Drivetrain Control ------ #
+        self.leftDrive = phoenix5.WPI_TalonSRX(5)
+        self.rightDrive = phoenix5.WPI_TalonSRX(3)
+        self.robotDrive = wpilib.drive.DifferentialDrive(self.leftDrive, self.rightDrive)
+
+        # We need to invert one side of the drivetrain so that positive voltages
+        # result in both sides moving forward.
+        self.rightDrive.setInverted(True)
+
+        # ------- Elevator Control ------- #
+        self.elevator = phoenix5.WPI_TalonSRX(7)
+
+        reverseElvEncoder = False
+        self.elevator_encoder = wpilib.Encoder(
+            ELV_ENCODER_A_PWM_PORT,
+            ELV_ENCODER_B_PWM_PORT,
+            reverseElvEncoder,
+            wpilib.Encoder.EncodingType.k2X)
+        self.elevator_encoder.reset()
+
+        distanceAtTopFirstStageDefault = 10890.5
+        distanceAtTopFirstStageInches = 31.625
+        self.elevator_encoder.setDistancePerPulse(
+            distanceAtTopFirstStageInches / distanceAtTopFirstStageDefault )
+
+        # --------- Arm Control ---------- #
+        self.arm_encoder = wpilib.DutyCycleEncoder(2)
+        self.arm = phoenix5.WPI_TalonSRX(9)
+
+        # ------------ Camera ------------ #
+        camera = CameraServer.startAutomaticCapture()
+        camera.setPixelFormat(VideoMode.PixelFormat.kMJPEG)
+        camera.setResolution(1280, 720)
+        camera.setFPS(30)
+
     def robotInit(self):
         """
         This function is called upon program startup and
         should be used for any initialization code.
         """
-        self.manualElvActive = True
+        self.hardwareInit()
 
-        self.leftDrive = phoenix5.WPI_TalonSRX(5)
-        self.rightDrive = phoenix5.WPI_TalonSRX(3)
-        self.elevator = phoenix5.WPI_TalonSRX(7)
-        self.arm = phoenix5.WPI_TalonSRX(9)
+        self.timer = wpilib.Timer()
 
-        self.elevator_encoder = wpilib.Encoder(0, 1, False, wpilib.Encoder.EncodingType.k2X)
-        self.elevator_encoder.reset()
-
-        self.arm_encoder = wpilib.DutyCycleEncoder(2)
-
+        self.elevatorControlMode = ElvControlMode.MANUAL
         self.elevatorSelectedPreset = ElvPresets.PROCESSOR
         self.elevatorActivePreset = ElvPresets.PROCESSOR
         self.elevatorPresets = {
@@ -55,46 +93,18 @@ class MyRobot(wpilib.TimedRobot):
             ElvPresets.BARGE: 36
         }
 
-        distanceAtTopFirstStageDefault = 10890.5
-        distanceAtTopFirstStageInches = 31.625
-        self.elevator_encoder.setDistancePerPulse(
-            distanceAtTopFirstStageInches / distanceAtTopFirstStageDefault )
-
-        camera = CameraServer.startAutomaticCapture()
-        camera.setPixelFormat( VideoMode.PixelFormat.kMJPEG )
-        camera.setResolution( 1280, 720 )
-        camera.setFPS( 30 )
-
-        self.robotDrive = wpilib.drive.DifferentialDrive(self.leftDrive, self.rightDrive)
-        self.controller = wpilib.XboxController(0)
-
-        self.timer = wpilib.Timer()
-        self.timeSnapshot = 0
-
-        # We need to invert one side of the drivetrain so that positive voltages
-        # result in both sides moving forward. Depending on how your robot's
-        # gearbox is constructed, you might have to invert the left side instead.
-        self.rightDrive.setInverted(True)
-
-
     def arcade_drive_train(self, move_speed, turn_speed, speed_toggle):
-        if speed_toggle == True:                                                                #fast normal
-            self.robotDrive.arcadeDrive(move_speed, turn_speed, squareInputs=True)
-        else:                                                                                   #slow normal
-            self.robotDrive.arcadeDrive(move_speed * 0.5, turn_speed * 0.5, squareInputs=True)
+        if speed_toggle:
+            speedMultipler = 1
+        else:
+            speedMultipler = 0.5
+
+        self.robotDrive.arcadeDrive(
+            move_speed * speedMultipler, turn_speed * speedMultipler, squareInputs=True)
 
     def elevator_drive_train(self, elevator_speed, speed_toggle, reverse_toggle,
-                             switch_preset_left, switch_preset_right, activate_preset, elevator_height):
-
-        def man_elevator_drive_train():
-            if speed_toggle == True and reverse_toggle == True:                                      #fast reverse
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, elevator_speed * -1)
-            elif speed_toggle == True:                                                               #fast normal    
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, elevator_speed)
-            elif reverse_toggle == True:                                                             #slow reverse 
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, elevator_speed * -0.25)
-            else:                                                                                    #slow normal         
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, elevator_speed * 0.25)
+                             switch_preset_left, switch_preset_right,
+                             activate_preset, elevator_height):
 
         def preset_data_collector():
             if switch_preset_left:
@@ -112,57 +122,72 @@ class MyRobot(wpilib.TimedRobot):
                 selectedPresetVal = (selectedPresetVal + 1) % len(self.elevatorPresets)
                 self.elevatorSelectedPreset = ElvPresets(selectedPresetVal)
 
-            if activate_preset == True:
+            if activate_preset:
                 self.elevatorActivePreset = self.elevatorSelectedPreset
-                self.manualElvActive = False
+                self.elevatorControlMode = ElvControlMode.AUTO
+
+        def man_elevator_drive_train():
+            if speed_toggle and reverse_toggle:
+                speedMultiplier = -1
+            elif speed_toggle:
+                speedMultiplier = 1
+            elif reverse_toggle:
+                speedMultiplier = -0.25
+            else:
+                speedMultiplier = 0.25
+
+            self.elevator.set(
+                phoenix5.TalonSRXControlMode.PercentOutput, elevator_speed * speedMultiplier)
 
         def auto_elevator_drive_train():
-            if ( elevator_height > activePresetHeight - 0.125 ) and ( elevator_height < activePresetHeight + 0.125):
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
+            activePresetHeight = self.elevatorPresets[ self.elevatorActivePreset ]
+            toleranceInches = 1/8
+            if (elevator_height > activePresetHeight - toleranceInches) and \
+                   (elevator_height < activePresetHeight + toleranceInches):
+                speed = 0
             elif elevator_height < activePresetHeight:
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.2)
+                speed = 0.2
             elif elevator_height > activePresetHeight:
-                self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, -0.2)
+                speed -0.2
+
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, speed )
 
         preset_data_collector()
 
-        activePresetHeight = self.elevatorPresets[ self.elevatorActivePreset ]
-
-        # If we use our button set for elevator speed, then we ignore preset mode.
         if elevator_speed > 0:
-            self.manualElvActive = True
+            # When using our analog input for elevator speed, go to manual mode.
+            self.elevatorControlMode = ElvControlMode.MANUAL
             man_elevator_drive_train()
 
-        # If we set our active preset, then we will start moving towards it as long
-        # as we don't change elevator speed.
-        elif not self.manualElvActive: 
+        elif self.elevatorControlMode == ElvControlMode.AUTO:
+            # If we set our active preset, then we will start moving towards it as long
+            # as we don't change elevator speed.
             auto_elevator_drive_train()
 
-        # If were not moving the elevator, and havent set an active preset, maintain
-        # the previous height.
         else:
+            # If were not manually moving the elevator and haven't set an active
+            # preset, maintain the existing height.
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
 
     def arm_drive_train(self, arm_speed, speed_toggle, reverse_toggle):
-        if speed_toggle == True and reverse_toggle == True:                                      #fast reverse
-            self.arm.set(phoenix5.TalonSRXControlMode.PercentOutput, arm_speed * -1)
-        elif speed_toggle == True:                                                               #fast normal    
-            self.arm.set(phoenix5.TalonSRXControlMode.PercentOutput, arm_speed)
-        elif reverse_toggle == True:                                                             #slow reverse 
-            self.arm.set(phoenix5.TalonSRXControlMode.PercentOutput, arm_speed * -0.25)
-        else:                                                                                    #slow normal         
-            self.arm.set(phoenix5.TalonSRXControlMode.PercentOutput, arm_speed * 0.25)
+        if speed_toggle and reverse_toggle:
+            speedMultiplier = -1
+        elif speed_toggle:
+            speedMultiplier = 1
+        elif reverse_toggle == True:
+            speedMultiplier = -0.25
+        else:
+            speedMultiplier = 0.25
 
+        self.arm.set(phoenix5.TalonSRXControlMode.PercentOutput,
+                     arm_speed * speedMultiplier)
 
     def autonomousInit(self):
         """This function is run once each time the robot enters autonomous mode."""
         self.timer.restart()
 
     def autonomousPeriodic(self):
-        
         """This function is called periodically during autonomous."""
-        # SmartDashboard.putBoolean("A", self.controller.getAButton())
-
         if self.elevator_encoder.getDistance() < 5:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.125)
         else:
@@ -173,8 +198,6 @@ class MyRobot(wpilib.TimedRobot):
 
     def teleopPeriodic(self):
         """This function is called periodically during teleoperated mode."""
-        safetyMode = False # Toggle to True if you want the robot to not move.
-
         moveFB = self.controller.getLeftY()
         turnLR = self.controller.getRightX() * -1 # Negative lets you turn with perspective
         lTrig = self.controller.getLeftTriggerAxis()
@@ -189,20 +212,20 @@ class MyRobot(wpilib.TimedRobot):
         elHeight = self.elevator_encoder.getDistance()
         armAngle = self.arm_encoder.get()
 
-        if safetyMode == True:
+        # Toggle to True if you want the robot to not move.
+        safetyMode = False
+        if safetyMode:
             moveFB = 0
             turnLR = 0
             lTrig = 0
 
-        # Uses the labeled height to index a height from a dictionary.
-
-        self.elevator_drive_train(lTrig, aPress, xPress, lBumpPressed, rBumpPressed, yPressed, elHeight)
+        self.elevator_drive_train(lTrig, aPress, xPress, lBumpPressed, rBumpPressed,
+                                  yPressed, elHeight)
         self.arcade_drive_train(moveFB, turnLR, aPress)
         self.arm_drive_train(rTrig, aPress, xPress)
 
         if bPress == True:
             self.elevator_encoder.reset()
-
 
         SmartDashboard.putNumber("Drive Power (LY)", moveFB)
         SmartDashboard.putNumber("Turn Power (RX)", turnLR)
@@ -215,6 +238,7 @@ class MyRobot(wpilib.TimedRobot):
 
         SmartDashboard.putBoolean("Height Reset (B)", bPress)
         SmartDashboard.putNumber("Elevator Height", elHeight)
+        SmartDashboard.putString("Elevator Control Mode", self.elevatorSelectedPreset.name)
         SmartDashboard.putString("Selected Preset Mode", self.elevatorSelectedPreset.name)
         SmartDashboard.putString("Active Preset Mode", self.elevatorActivePreset.name)
 
