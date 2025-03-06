@@ -11,8 +11,6 @@
 #
 # to deploy code to the robot.
 
-# Figure out how to use encoder
-
 from enum import Enum
 
 from wpilib import SmartDashboard
@@ -70,6 +68,37 @@ class MyRobot(wpilib.TimedRobot):
         self.arm_encoder = wpilib.DutyCycleEncoder(ARM_ENCODER_DIO_PORT)
         self.arm = phoenix5.WPI_TalonSRX(9)
 
+        # TODO: The servo motor controlling the ratchet will be initialized here,
+        # probably like so.
+        #
+        #     self.armServo = wpilib.Servo( {the PWM port # the servo's attached to} )
+        #
+        # I assume we engage and disengage it by calling `self.armServo.set(0)` and 
+        # `self.armServo.set(1)` (where `set()` takes a decimal value from 0 to 1
+        # representing full-left and full-right rotation). I might be wrong, play with
+        # numbers here.
+        # https://docs.wpilib.org/en/stable/docs/software/hardware-apis/motors/servos.html
+        # https://robotpy.readthedocs.io/projects/wpilib/en/latest/wpilib/Servo.html
+        # https://www.andymark.com/products/ratchet-sport?Option=Ratchet%20with%20Servo%20Actuator&quantity=1
+        #
+        # Some ideas for how to integrate it into the code, and to program the arm:
+        #     - When the arm motor is not powered, engage the servo (and vice versa,
+        #       when the arm motor is powered, disengage the servo)
+        #
+        #     - If the arm moves X degrees from the last controller input,
+        #       automatically power it until it's back to its old position.
+        #
+        #     - Add a limit to how far back the arm can go (when at the limit, engage
+        #       the socket, stop powering the arm motor, and ignore controller input).
+        #         - This limit should be the angle we fire the ball into the barge.
+        #
+        #     - Add a limit to how far forward the arm can go (when at the limit,
+        #       move the arm up so that it doesn't keep sagging, and ignore all
+        #       controller inputs)
+        #         - Make this limit a little past how low we need to go to pick up
+        #           from the ground? I don't think there's a reason for us to go
+        #           any lower than that.
+
         # ------------ Camera ------------ #
         camera = CameraServer.startAutomaticCapture()
         camera.setPixelFormat(VideoMode.PixelFormat.kMJPEG)
@@ -89,6 +118,18 @@ class MyRobot(wpilib.TimedRobot):
         self.elevatorSelectedPreset = ElvPresets.PROCESSOR
         self.elevatorActivePreset = ElvPresets.PROCESSOR
         
+        # TODO: Figure out the actual heights we need for this. For the reef, if
+        # we want the claw to sit right above the algae when the claw is brought
+        # down to 90 degree angle, these values should be (based on the CAD models
+        # online, and *measured from the ground*)
+        #
+        #     ElvPresets.REEF_LOW: 50 inches
+        #     ElvPresets.REEF_HIGH: 63 inches
+        #
+        # The barge height should be our max height. The processor preset height is
+        # difficult to determine without a physical model. The bottom edge of the
+        # processor is 7 inches from the ground. The top edge is 27 inches from the
+        # ground.
         self.elevatorPresets = {
             ElvPresets.PROCESSOR: 0,
             ElvPresets.REEF_LOW: 12,
@@ -191,6 +232,11 @@ class MyRobot(wpilib.TimedRobot):
 
     def autonomousPeriodic(self):
         """This function is called periodically during autonomous."""
+        # TODO: The times, distances, and motor speeds hard coded here are mostly
+        # arbitrary. If we can't change the hardcoded values in time to reliably get
+        # our robot to do anything meaningful in autonomous, comment most of these
+        # lines and just make it move forward enough to cross the point line.
+
         time = self.timer.get()
         if time < 8 and self.elevator_encoder.getDistance() < self.elevatorMaxHeight:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.125)
@@ -198,7 +244,6 @@ class MyRobot(wpilib.TimedRobot):
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, -0.125)
         else:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
-
 
         if time < 2:
             self.arcade_drive_train(0.1, 0, True, False)
@@ -228,9 +273,16 @@ class MyRobot(wpilib.TimedRobot):
         lBumpPressed = self.controller.getLeftBumperButtonPressed()
         rBumpPressed = self.controller.getRightBumperButtonPressed()
 
+        # TODO: Note that this height is *not* the height from the ground. It is the
+        # height relative to the elevator's starting position. This is important for
+        # getting the elevator to a preset height.
+        #
+        # We need to either add the distance (in inches) from the bottom of the
+        # starting elevator height to the ground, or subtract that same value from
+        # all values in self.elevatorPresets.
         elHeight = self.elevator_encoder.getDistance()
 
-        #Multiplied by 360 to convert from 0 - 1 to 0 - 360
+        # Multiplied by 360 to convert from 0 - 1 to 0 - 360
         armAngle = (self.arm_encoder.get() * 360)
 
         # Toggle to True if you want the robot to not move.
