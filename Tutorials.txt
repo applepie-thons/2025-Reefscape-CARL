@@ -2,7 +2,7 @@
 self.leftDrive.set(phoenix5.TalonSRXControlMode.PercentOutput, value=-.1)
 self.rightDrive.set(phoenix5.TalonSRXControlMode.PercentOutput, value=.1)
 
-This is how we need to program the elevator and claw arm moters.
+This is how we need to program the elevator and claw arm motors.
 """
 
 """      

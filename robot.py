@@ -23,6 +23,7 @@ from cscore import CameraServer, VideoMode
 
 ELV_ENCODER_A_PWM_PORT = 0
 ELV_ENCODER_B_PWM_PORT = 1
+ARM_ENCODER_DIO_PORT = 2
 
 class ElvControlMode(Enum):
     MANUAL = 0
@@ -52,6 +53,7 @@ class MyRobot(wpilib.TimedRobot):
         self.elevator = phoenix5.WPI_TalonSRX(7)
 
         reverseElvEncoder = False
+        self.elevatorMaxHeight = 62.4
         self.elevator_encoder = wpilib.Encoder(
             ELV_ENCODER_A_PWM_PORT,
             ELV_ENCODER_B_PWM_PORT,
@@ -65,7 +67,7 @@ class MyRobot(wpilib.TimedRobot):
             distanceAtTopFirstStageInches / distanceAtTopFirstStageDefault )
 
         # --------- Arm Control ---------- #
-        self.arm_encoder = wpilib.DutyCycleEncoder(2)
+        self.arm_encoder = wpilib.DutyCycleEncoder(ARM_ENCODER_DIO_PORT)
         self.arm = phoenix5.WPI_TalonSRX(9)
 
         # ------------ Camera ------------ #
@@ -86,6 +88,7 @@ class MyRobot(wpilib.TimedRobot):
         self.elevatorControlMode = ElvControlMode.MANUAL
         self.elevatorSelectedPreset = ElvPresets.PROCESSOR
         self.elevatorActivePreset = ElvPresets.PROCESSOR
+        
         self.elevatorPresets = {
             ElvPresets.PROCESSOR: 0,
             ElvPresets.REEF_LOW: 12,
@@ -93,14 +96,14 @@ class MyRobot(wpilib.TimedRobot):
             ElvPresets.BARGE: 36
         }
 
-    def arcade_drive_train(self, move_speed, turn_speed, speed_toggle):
+    def arcade_drive_train(self, move_speed, turn_speed, speed_toggle, square_val):
         if speed_toggle:
             speedMultipler = 1
         else:
             speedMultipler = 0.5
 
         self.robotDrive.arcadeDrive(
-            move_speed * speedMultipler, turn_speed * speedMultipler, squareInputs=True)
+            move_speed * speedMultipler, turn_speed * speedMultipler, squareInputs=square_val)
 
     def elevator_drive_train(self, elevator_speed, speed_toggle, reverse_toggle,
                              switch_preset_left, switch_preset_right,
@@ -148,7 +151,7 @@ class MyRobot(wpilib.TimedRobot):
             elif elevator_height < activePresetHeight:
                 speed = 0.2
             elif elevator_height > activePresetHeight:
-                speed -0.2
+                speed = -0.2
 
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, speed )
 
@@ -188,10 +191,26 @@ class MyRobot(wpilib.TimedRobot):
 
     def autonomousPeriodic(self):
         """This function is called periodically during autonomous."""
-        if self.elevator_encoder.getDistance() < 5:
+        time = self.timer.get()
+        if time < 8 and self.elevator_encoder.getDistance() < self.elevatorMaxHeight:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0.125)
+        elif time < 11 and self.elevator_encoder.getDistance() > 2:
+            self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, -0.125)
         else:
             self.elevator.set(phoenix5.TalonSRXControlMode.PercentOutput, 0)
+
+
+        if time < 2:
+            self.arcade_drive_train(0.1, 0, True, False)
+        elif time < 4:
+            self.arcade_drive_train(0, 0.1, True, False)
+        else:
+            self.arcade_drive_train(0, 0, False, False)
+        
+        if time < 12:
+            self.arm_drive_train(0.125, True, True)
+        else:
+            self.arm_drive_train(0, True, True)
 
     def teleopInit(self):
         """This function is called once each time the robot enters teleoperated mode."""
@@ -210,7 +229,9 @@ class MyRobot(wpilib.TimedRobot):
         rBumpPressed = self.controller.getRightBumperButtonPressed()
 
         elHeight = self.elevator_encoder.getDistance()
-        armAngle = self.arm_encoder.get()
+
+        #Multiplied by 360 to convert from 0 - 1 to 0 - 360
+        armAngle = (self.arm_encoder.get() * 360)
 
         # Toggle to True if you want the robot to not move.
         safetyMode = False
@@ -221,7 +242,7 @@ class MyRobot(wpilib.TimedRobot):
 
         self.elevator_drive_train(lTrig, aPress, xPress, lBumpPressed, rBumpPressed,
                                   yPressed, elHeight)
-        self.arcade_drive_train(moveFB, turnLR, aPress)
+        self.arcade_drive_train(moveFB, turnLR, aPress, True)
         self.arm_drive_train(rTrig, aPress, xPress)
 
         if bPress == True:
@@ -238,7 +259,7 @@ class MyRobot(wpilib.TimedRobot):
 
         SmartDashboard.putBoolean("Height Reset (B)", bPress)
         SmartDashboard.putNumber("Elevator Height", elHeight)
-        SmartDashboard.putString("Elevator Control Mode", self.elevatorSelectedPreset.name)
+        SmartDashboard.putString("Elevator Control Mode", self.elevatorControlMode.name)
         SmartDashboard.putString("Selected Preset Mode", self.elevatorSelectedPreset.name)
         SmartDashboard.putString("Active Preset Mode", self.elevatorActivePreset.name)
 
